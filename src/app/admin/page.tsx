@@ -297,12 +297,38 @@ function StudentsTab({
 }) {
   const [query, setQuery] = useState('');
   const empty = { name: '', email: '', rollNumber: '', department: '', semester: '', guardianEmail: '', phone: '' };
-  const [form, setForm]   = useState(empty);
+  const [form, setForm] = useState(empty);
+
+  // Drawer state: null = closed, 'add' = add mode, Student object = edit mode
+  const [drawer, setDrawer] = useState<null | 'add' | Student>(null);
 
   const [enrollModal, setEnrollModal] = useState<{show: boolean, studentId: string, name: string}>({show: false, studentId: '', name: ''});
   const [isCapturing, setIsCapturing] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  function openAddDrawer() {
+    setForm(empty);
+    setDrawer('add');
+  }
+
+  function openEditDrawer(s: Student) {
+    setForm({
+      name: s.name || '',
+      email: s.email || '',
+      rollNumber: s.rollNumber || '',
+      department: s.department || '',
+      semester: s.semester || '',
+      guardianEmail: s.guardianEmail || '',
+      phone: s.phone || '',
+    });
+    setDrawer(s);
+  }
+
+  function closeDrawer() {
+    setDrawer(null);
+    setForm(empty);
+  }
 
   async function openEnrollModal(studentId: string, name: string) {
     setEnrollModal({ show: true, studentId, name });
@@ -332,16 +358,23 @@ function StudentsTab({
     setIsCapturing(false);
   }
 
-  async function handleAddStudent(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim() || !form.rollNumber.trim()) {
       showToast('Name, email, and roll number are required.', 'error'); return;
     }
-    const s: Student = { id: uid('stu'), ...form };
-    await dbAddStudent(s);
-    onUpdate([s, ...students]);
-    setForm(empty);
-    showToast(`${s.name} added.`, 'success');
+    if (drawer === 'add') {
+      const s: Student = { id: uid('stu'), ...form };
+      await dbAddStudent(s);
+      onUpdate([s, ...students]);
+      showToast(`${s.name} added.`, 'success');
+    } else if (drawer && typeof drawer === 'object') {
+      const updates = { ...form };
+      await dbUpdateStudent(drawer.id, updates);
+      onUpdate(students.map(s => s.id === (drawer as Student).id ? { ...s, ...updates } : s));
+      showToast(`${form.name} updated.`, 'success');
+    }
+    closeDrawer();
   }
 
   async function removeStudent(id: string) {
@@ -367,51 +400,38 @@ function StudentsTab({
         (s.department || '').toLowerCase().includes(query.toLowerCase()))
     : students;
 
-  const F = (id: keyof typeof empty, label: string, req = false, type = 'text', ph = '', wide = false) => (
-    <div className={wide ? 'col-span-2 sm:col-span-1' : ''}>
+  const isEdit = drawer !== null && drawer !== 'add';
+
+  const Field = (id: keyof typeof empty, label: string, req = false, type = 'text', ph = '') => (
+    <div>
       <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
         {label}{req && <span className="ml-0.5 text-zinc-200">*</span>}
       </label>
       <input type={type} value={form[id]} placeholder={ph}
         onChange={e => setForm(f => ({ ...f, [id]: e.target.value }))}
-        className="w-full rounded-[10px] border border-white/[0.08] bg-white/[0.06] px-3 py-2 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition focus:border-white/30" />
+        className="w-full rounded-[10px] border border-white/[0.08] bg-white/[0.06] px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition focus:border-white/30 focus:bg-white/[0.08]" />
     </div>
   );
 
   return (
-    <div className="grid grid-cols-[320px_1fr] gap-5 items-start lg:grid-cols-1">
-      {/* Add form */}
-      <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
-        <div className="border-b border-white/[0.07] px-4 py-3.5">
-          <h3 className="text-sm font-semibold">Add New Student</h3>
-          <p className="mt-0.5 text-[11px] text-zinc-600">Fields marked <span className="text-zinc-200">*</span> are required</p>
-        </div>
-        <form onSubmit={handleAddStudent} className="p-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-1">
-            {F('name',         'Full Name',      true,  'text',  'Aarav Sharma')}
-            {F('email',        'Email',          true,  'email', 'student@example.com')}
-            {F('rollNumber',   'Roll Number',    true,  'text',  'CS-2024-001')}
-            {F('department',   'Department',     false, 'text',  'Computer Science')}
-            {F('semester',     'Semester',       false, 'text',  '5')}
-            {F('guardianEmail','Guardian Email', false, 'email', 'guardian@example.com')}
-            {F('phone',        'Phone',          false, 'tel',   '+91 98765 00000', true)}
-          </div>
-          <button type="submit" className="mt-4 w-full rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_14px_rgba(255,255,255,0.08)] transition hover:bg-zinc-200">
-            Add Student
-          </button>
-        </form>
-      </div>
-
-      {/* Table */}
+    <div className="relative">
+      {/* Table card */}
       <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3.5">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">Student Records</h3>
             <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-zinc-400">{students.length}</span>
           </div>
-          <input type="search" value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="Search name, roll, dept..."
-            className="w-52 rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-700 outline-none focus:border-white/30" />
+          <div className="flex items-center gap-2">
+            <input type="search" value={query} onChange={e => setQuery(e.target.value)}
+              placeholder="Search name, roll, dept..."
+              className="w-52 rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-700 outline-none focus:border-white/30" />
+            <button onClick={openAddDrawer}
+              className="flex items-center gap-1.5 rounded-[9px] bg-white px-3.5 py-1.5 text-xs font-semibold text-black shadow-[0_2px_12px_rgba(255,255,255,0.1)] transition hover:bg-zinc-200 active:scale-95">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Student
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px]">
@@ -425,7 +445,7 @@ function StudentsTab({
             <tbody className="divide-y divide-white/[0.04]">
               {filtered.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-zinc-600">
-                  {query ? 'No students match your search.' : 'No students yet — add one using the form.'}
+                  {query ? 'No students match your search.' : 'No students yet — click Add Student to begin.'}
                 </td></tr>
               ) : filtered.map(s => {
                 const stats = getStats(s.id, records);
@@ -459,6 +479,11 @@ function StudentsTab({
                           className="rounded-[8px] border border-white/[0.08] bg-white/[0.05] px-2.5 py-1 text-xs font-semibold text-zinc-300 transition hover:bg-white/[0.1]">
                           Mark Present
                         </button>
+                        <button onClick={() => openEditDrawer(s)}
+                          className="inline-flex items-center gap-1 rounded-[8px] border border-blue-500/30 bg-blue-500/[0.08] px-2.5 py-1 text-xs font-semibold text-blue-400 transition hover:bg-blue-500/15">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          Edit
+                        </button>
                         <button onClick={() => openEnrollModal(s.id, s.name)}
                           className={`rounded-[8px] border px-2.5 py-1 text-xs font-semibold transition ${s.faceTemplate ? 'border-white/[0.08] bg-white/[0.05] text-zinc-400 hover:bg-white/[0.1]' : 'border-white/25 bg-white/10 text-zinc-400 hover:bg-white/20'}`}>
                           {s.faceTemplate ? 'Re-enroll' : 'Enroll Face'}
@@ -477,8 +502,67 @@ function StudentsTab({
         </div>
       </div>
 
+      {/* ── Add / Edit Drawer ── */}
+      {/* Backdrop */}
+      {drawer !== null && (
+        <div className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-sm" onClick={closeDrawer} />
+      )}
+      {/* Panel */}
+      <div className={`fixed inset-y-0 right-0 z-[100] flex w-full max-w-[420px] flex-col border-l border-white/[0.08] bg-zinc-950 shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] ${drawer !== null ? 'translate-x-0' : 'translate-x-full'}`}>
+        {/* Panel header */}
+        <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-4">
+          <div>
+            <h3 className="text-base font-bold text-white">{isEdit ? 'Edit Student' : 'Add New Student'}</h3>
+            <p className="mt-0.5 text-[11px] text-zinc-500">
+              {isEdit ? `Editing: ${(drawer as Student).name}` : 'Fields marked * are required'}
+            </p>
+          </div>
+          <button onClick={closeDrawer} className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-white">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-y-auto">
+          <div className="flex flex-col gap-4 p-5">
+            {/* Name + Roll side-by-side */}
+            <div className="grid grid-cols-2 gap-3">
+              {Field('name',       'Full Name',   true,  'text',  'Aarav Sharma')}
+              {Field('rollNumber', 'Roll Number', true,  'text',  'TE-A-001')}
+            </div>
+            {Field('email', 'Email Address', true, 'email', 'student@example.com')}
+            <div className="grid grid-cols-2 gap-3">
+              {Field('department', 'Department', false, 'text', 'Computer Engineering')}
+              {Field('semester',   'Semester',   false, 'text', '5')}
+            </div>
+            {Field('phone',        'Phone Number',    false, 'tel',   '+91 98765 00000')}
+            {Field('guardianEmail','Guardian Email',  false, 'email', 'guardian@example.com')}
+
+            {isEdit && (
+              <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-4 py-3">
+                <p className="text-[10.5px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">Student ID</p>
+                <p className="font-mono text-xs text-zinc-400">{(drawer as Student).id}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Actions pinned to bottom */}
+          <div className="mt-auto border-t border-white/[0.07] p-5 flex gap-3">
+            <button type="button" onClick={closeDrawer}
+              className="flex-1 rounded-[10px] border border-white/[0.08] bg-white/[0.05] py-2.5 text-sm font-semibold text-zinc-300 transition hover:bg-white/[0.1]">
+              Cancel
+            </button>
+            <button type="submit"
+              className="flex-1 rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_14px_rgba(255,255,255,0.1)] transition hover:bg-zinc-200 active:scale-[0.98]">
+              {isEdit ? 'Save Changes' : 'Add Student'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Enroll face modal */}
       {enrollModal.show && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-5">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-5">
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl">
             <div className="border-b border-white/10 px-5 py-4 flex items-center justify-between">
               <div>
@@ -494,8 +578,8 @@ function StudentsTab({
                 <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" style={{transform: 'scaleX(-1)'}} />
                 {isCapturing && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="flex items-center gap-2 bg-white text-black text-white px-4 py-2 rounded-full text-sm font-semibold">
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    <div className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full text-sm font-semibold">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent" />
                       Capturing...
                     </div>
                   </div>
