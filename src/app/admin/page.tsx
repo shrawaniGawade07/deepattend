@@ -307,6 +307,9 @@ function StudentsTab({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const [sending,    setSending]    = useState<Set<string>>(new Set());
+  const [sendingAll, setSendingAll] = useState(false);
+
   function openAddDrawer() {
     setForm(empty);
     setDrawer('add');
@@ -393,6 +396,42 @@ function StudentsTab({
     showToast(`${s?.name} marked present`, 'success');
   }
 
+  async function sendReport(s: Student) {
+    if (!s.email) { showToast(`${s.name} has no email address.`, 'error'); return; }
+    setSending(prev => new Set(prev).add(s.id));
+    try {
+      const res = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'single', student: s, records }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Request failed');
+      showToast(`Report sent to ${s.name}.`, 'success');
+    } catch (err: unknown) {
+      showToast(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+    }
+    setSending(prev => { const n = new Set(prev); n.delete(s.id); return n; });
+  }
+
+  async function sendAllReports() {
+    const withEmail = students.filter(s => s.email);
+    if (withEmail.length === 0) { showToast('No students have email addresses.', 'error'); return; }
+    setSendingAll(true);
+    try {
+      const res = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'all', students: withEmail, records }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      showToast(`Reports sent: ${data.sent} succeeded${data.failed ? `, ${data.failed} failed` : ''}.`, data.failed ? '' : 'success');
+    } catch (err: unknown) {
+      showToast(`Send all failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+    }
+    setSendingAll(false);
+  }
+
   const filtered = query.trim()
     ? students.filter(s =>
         s.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -426,6 +465,13 @@ function StudentsTab({
             <input type="search" value={query} onChange={e => setQuery(e.target.value)}
               placeholder="Search name, roll, dept..."
               className="w-52 rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-700 outline-none focus:border-white/30" />
+            <button onClick={sendAllReports} disabled={sendingAll}
+              className="flex items-center gap-1.5 rounded-[9px] border border-white/[0.08] bg-white/[0.05] px-3.5 py-1.5 text-xs font-semibold text-zinc-300 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50">
+              {sendingAll
+                ? <><svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Sending All...</>
+                : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send All Reports</>
+              }
+            </button>
             <button onClick={openAddDrawer}
               className="flex items-center gap-1.5 rounded-[9px] bg-white px-3.5 py-1.5 text-xs font-semibold text-black shadow-[0_2px_12px_rgba(255,255,255,0.1)] transition hover:bg-zinc-200 active:scale-95">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -483,6 +529,14 @@ function StudentsTab({
                           className="inline-flex items-center gap-1 rounded-[8px] border border-blue-500/30 bg-blue-500/[0.08] px-2.5 py-1 text-xs font-semibold text-blue-400 transition hover:bg-blue-500/15">
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                           Edit
+                        </button>
+                        <button onClick={() => sendReport(s)} disabled={sending.has(s.id)}
+                          className="inline-flex items-center gap-1 rounded-[8px] border border-violet-500/30 bg-violet-500/[0.07] px-2.5 py-1 text-xs font-semibold text-violet-400 transition hover:bg-violet-500/15 disabled:cursor-not-allowed disabled:opacity-50">
+                          {sending.has(s.id)
+                            ? <svg className="h-2.5 w-2.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            : <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                          }
+                          {sending.has(s.id) ? 'Sending…' : 'Send Report'}
                         </button>
                         <button onClick={() => openEnrollModal(s.id, s.name)}
                           className={`rounded-[8px] border px-2.5 py-1 text-xs font-semibold transition ${s.faceTemplate ? 'border-white/[0.08] bg-white/[0.05] text-zinc-400 hover:bg-white/[0.1]' : 'border-white/25 bg-white/10 text-zinc-400 hover:bg-white/20'}`}>
