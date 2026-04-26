@@ -50,9 +50,9 @@ export function uid(prefix: string): string {
 }
 
 export function getStats(studentId: string, records: AttendanceRecord[]): AttendanceStats {
-  const sr = records.filter(r => r.studentId === studentId);
-  const total   = sr.length;
-  const present = sr.filter(r => r.status === 'present').length;
+  const uniqueDates = new Set(records.map(r => r.date));
+  const total = uniqueDates.size;
+  const present = records.filter(r => r.studentId === studentId && r.status === 'present').length;
   return {
     totalClasses:   total,
     presentClasses: present,

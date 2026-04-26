@@ -3,11 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
-  getStudents, saveStudents, getRecords, saveRecords,
+  fetchStudents, addStudent as dbAddStudent, deleteStudent as dbDeleteStudent, updateStudent as dbUpdateStudent,
+  fetchRecords, addRecord as dbAddRecord, deleteRecord as dbDeleteRecord, clearAllRecords,
   getAdminPassword, saveAdminPassword,
   todayKey, uid, getStats,
   ATTENDANCE_THRESHOLD,
-} from '@/lib/storage';
+} from '@/lib/db';
+import { extractFaceTemplate } from '@/lib/face';
 import type { Student, AttendanceRecord } from '@/lib/types';
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -42,18 +44,20 @@ function Toast({ msg, type, show }: { msg: string; type: string; show: boolean }
 // ── Stat card with icon ───────────────────────────────────────
 function StatCard({ label, value, accent, icon }: {
   label: string; value: number | string;
-  accent?: 'indigo' | 'amber' | 'green'; icon: React.ReactNode;
+  accent?: 'white' | 'amber' | 'green'; icon: React.ReactNode;
 }) {
-  const C = {
-    indigo: { wrap: 'border-indigo-500/25 bg-indigo-500/[0.07]', ico: 'bg-indigo-500/15 text-indigo-400', val: 'text-indigo-300' },
-    amber:  { wrap: 'border-amber-500/25  bg-amber-500/[0.07]',  ico: 'bg-amber-500/15  text-amber-400',  val: 'text-amber-400'  },
-    green:  { wrap: 'border-green-500/25  bg-green-500/[0.07]',  ico: 'bg-green-500/15  text-green-400',  val: 'text-green-400'  },
-  }[accent ?? ''] ?? { wrap: 'border-white/[0.08] bg-white/[0.03]', ico: 'bg-white/[0.06] text-zinc-500', val: 'text-white' };
+  const colorMap: Record<string, { wrap: string, ico: string, val: string }> = {
+    white: { wrap: 'border-white/10 bg-gradient-to-br from-white/[0.05] to-transparent', ico: 'bg-white/10 text-white shadow-[0_0_15px_rgba(255,255,255,0.1)]', val: 'text-white' },
+    amber:  { wrap: 'border-amber-500/20 bg-gradient-to-br from-amber-500/[0.08] to-transparent',  ico: 'bg-amber-500/20 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]',  val: 'text-amber-100'  },
+    green:  { wrap: 'border-green-500/20 bg-gradient-to-br from-green-500/[0.08] to-transparent',  ico: 'bg-green-500/20 text-green-400 shadow-[0_0_15px_rgba(34,197,94,0.2)]',  val: 'text-green-100'  },
+  };
+  const C = colorMap[accent ?? ''] ?? { wrap: 'border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-transparent', ico: 'bg-white/[0.08] text-zinc-400', val: 'text-white' };
   return (
-    <div className={`rounded-2xl border p-5 ${C.wrap}`}>
-      <div className={`mb-3.5 inline-flex h-9 w-9 items-center justify-center rounded-xl ${C.ico}`}>{icon}</div>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-600">{label}</p>
-      <strong className={`mt-1 block text-3xl font-bold leading-none tracking-tight ${C.val}`}>{value}</strong>
+    <div className={`relative overflow-hidden rounded-2xl border p-5 transition-transform hover:-translate-y-1 ${C.wrap}`}>
+      <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/[0.02] blur-xl pointer-events-none" />
+      <div className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl ${C.ico}`}>{icon}</div>
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">{label}</p>
+      <strong className={`mt-1 block text-4xl font-bold tracking-tight ${C.val}`}>{value}</strong>
     </div>
   );
 }
@@ -88,16 +92,11 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-zinc-950 p-6">
       <div className="pointer-events-none absolute inset-0 flex items-start justify-center overflow-hidden">
-        <div className="mt-[-80px] h-[500px] w-[500px] rounded-full bg-indigo-500/[0.04] blur-3xl" />
+        <div className="mt-[-80px] h-[500px] w-[500px] rounded-full bg-white/[0.04] blur-3xl" />
       </div>
       <div className="relative w-full max-w-[390px]">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-500 shadow-[0_0_32px_rgba(99,102,241,0.45)]">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">DeepAttend</h1>
+        <div className="mb-8 flex flex-col items-center text-center">
+          <img src="/logo_full.webp" alt="DeepAttend Logo" className="mb-4 h-14 w-auto drop-shadow-[0_0_32px_rgba(255,255,255,0.15)]" />
           <p className="mt-1 text-sm text-zinc-500">Admin Panel — sign in to continue</p>
         </div>
         <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-7 shadow-xl shadow-black/30">
@@ -109,7 +108,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
                 onChange={e => { setPw(e.target.value); setErr(''); }}
                 placeholder="Enter admin password"
                 className={`w-full rounded-[10px] border bg-white/[0.06] px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition ${
-                  err ? 'border-red-500/50' : 'border-white/[0.08] focus:border-indigo-500/60'
+                  err ? 'border-red-500/50' : 'border-white/[0.08] focus:border-white/40'
                 }`}
               />
               {err && (
@@ -120,7 +119,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
               )}
             </div>
             <button type="submit" disabled={loading || !pw}
-              className="flex items-center justify-center gap-2 rounded-[10px] bg-indigo-500 py-2.5 text-sm font-semibold text-white shadow-[0_2px_16px_rgba(99,102,241,0.35)] transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-55">
+              className="flex items-center justify-center gap-2 rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_16px_rgba(255,255,255,0.1)] transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-55">
               {loading
                 ? <><svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Verifying...</>
                 : 'Sign In'
@@ -128,9 +127,6 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             </button>
           </form>
         </div>
-        <p className="mt-4 text-center text-xs text-zinc-700">
-          Default password: <code className="rounded bg-white/[0.06] px-1.5 py-0.5 text-zinc-500">admin123</code>
-        </p>
       </div>
     </div>
   );
@@ -146,23 +142,23 @@ function DashboardTab({ students, records }: { students: Student[]; records: Att
   const enrolled     = students.filter(s => Array.isArray(s.faceTemplate)).length;
 
   const EmptyState = ({ icon, text, sub }: { icon: React.ReactNode; text: string; sub: string }) => (
-    <div className="flex flex-col items-center justify-center gap-2.5 py-10 text-center">
-      <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.03] text-zinc-700">{icon}</div>
-      <div><p className="text-sm font-medium text-zinc-600">{text}</p><p className="mt-0.5 text-xs text-zinc-700">{sub}</p></div>
+    <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/[0.06] bg-gradient-to-br from-white/[0.04] to-transparent text-zinc-600 shadow-inner">{icon}</div>
+      <div><p className="text-[15px] font-semibold text-zinc-300">{text}</p><p className="mt-1 text-xs text-zinc-500">{sub}</p></div>
     </div>
   );
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-4 gap-3 lg:grid-cols-2">
+      <div className="grid grid-cols-4 gap-4 xl:grid-cols-2 sm:grid-cols-1">
         <StatCard label="Total Students" value={students.length} icon={IC.users} />
         <StatCard label="Faces Enrolled" value={enrolled}        icon={IC.scan} />
-        <StatCard label="Present Today"  value={presentToday.size} accent="indigo" icon={IC.check} />
+        <StatCard label="Present Today"  value={presentToday.size} accent="white" icon={IC.check} />
         <StatCard label="Below 75%"      value={riskCount}        accent="amber"  icon={IC.alert} />
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
+      <div className="grid grid-cols-2 gap-5 lg:grid-cols-1">
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-zinc-950/50 shadow-lg">
           <div className="border-b border-white/[0.07] px-4 py-3.5">
             <h3 className="text-sm font-semibold">Recent Activity</h3>
             <p className="mt-0.5 text-[11px] text-zinc-600">Latest attendance records</p>
@@ -176,12 +172,12 @@ function DashboardTab({ students, records }: { students: Student[]; records: Att
                   const ini = s?.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase() ?? '?';
                   return (
                     <div key={r.id} className="flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 transition hover:bg-white/[0.04]">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-400">{ini}</div>
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-[10px] font-bold text-zinc-400">{ini}</div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-zinc-200">{s?.name ?? 'Unknown'}</p>
                         <p className="text-[11px] text-zinc-600">{r.date} · {t}</p>
                       </div>
-                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${r.method === 'face' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/[0.06] text-zinc-500'}`}>{r.method}</span>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${r.method === 'face' ? 'bg-white/10 text-zinc-400' : 'bg-white/[0.06] text-zinc-500'}`}>{r.method}</span>
                     </div>
                   );
                 })
@@ -189,7 +185,7 @@ function DashboardTab({ students, records }: { students: Student[]; records: Att
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-zinc-950/50 shadow-lg">
           <div className="border-b border-white/[0.07] px-4 py-3.5">
             <h3 className="text-sm font-semibold">Attendance Risk</h3>
             <p className="mt-0.5 text-[11px] text-zinc-600">Students below {ATTENDANCE_THRESHOLD}% threshold</p>
@@ -234,33 +230,63 @@ function StudentsTab({
   const empty = { name: '', email: '', rollNumber: '', department: '', semester: '', guardianEmail: '', phone: '' };
   const [form, setForm]   = useState(empty);
 
-  function addStudent(e: React.FormEvent) {
+  const [enrollModal, setEnrollModal] = useState<{show: boolean, studentId: string, name: string}>({show: false, studentId: '', name: ''});
+  const [isCapturing, setIsCapturing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  async function openEnrollModal(studentId: string, name: string) {
+    setEnrollModal({ show: true, studentId, name });
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+    } catch { showToast('Camera access denied.', 'error'); }
+  }
+
+  function closeEnrollModal() {
+    setEnrollModal({ show: false, studentId: '', name: '' });
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+  }
+
+  async function captureFace() {
+    if (!videoRef.current || isCapturing) return;
+    setIsCapturing(true);
+    try {
+      const template = await extractFaceTemplate(videoRef.current);
+      await dbUpdateStudent(enrollModal.studentId, { faceTemplate: template });
+      const updated = students.map(s => s.id === enrollModal.studentId ? { ...s, faceTemplate: template } : s);
+      onUpdate(updated);
+      showToast(`Face enrolled for ${enrollModal.name}.`, 'success');
+      closeEnrollModal();
+    } catch { showToast('Face capture failed. Ensure face is visible.', 'error'); }
+    setIsCapturing(false);
+  }
+
+  async function handleAddStudent(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim() || !form.rollNumber.trim()) {
       showToast('Name, email, and roll number are required.', 'error'); return;
     }
     const s: Student = { id: uid('stu'), ...form };
-    const updated = [s, ...students];
-    saveStudents(updated);
-    onUpdate(updated);
+    await dbAddStudent(s);
+    onUpdate([s, ...students]);
     setForm(empty);
     showToast(`${s.name} added.`, 'success');
   }
 
-  function removeStudent(id: string) {
+  async function removeStudent(id: string) {
     const s = students.find(x => x.id === id);
-    const updated = students.filter(x => x.id !== id);
-    saveStudents(updated);
-    onUpdate(updated);
+    await dbDeleteStudent(id);
+    onUpdate(students.filter(x => x.id !== id));
     showToast(`${s?.name ?? 'Student'} removed.`);
   }
 
-  function markManual(studentId: string) {
+  async function markManual(studentId: string) {
     const date   = todayKey();
     const newRec: AttendanceRecord = { id: uid('att'), studentId, date, status: 'present', method: 'manual', confidence: 100, timestamp: Date.now() };
-    const updated = [newRec, ...records.filter(r => !(r.studentId === studentId && r.date === date))];
-    saveRecords(updated);
-    onRecordsUpdate(updated);
+    await dbAddRecord(newRec);
+    onRecordsUpdate([newRec, ...records.filter(r => !(r.studentId === studentId && r.date === date))]);
     const s = students.find(x => x.id === studentId);
     showToast(`${s?.name} marked present`, 'success');
   }
@@ -275,11 +301,11 @@ function StudentsTab({
   const F = (id: keyof typeof empty, label: string, req = false, type = 'text', ph = '', wide = false) => (
     <div className={wide ? 'col-span-2 sm:col-span-1' : ''}>
       <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
-        {label}{req && <span className="ml-0.5 text-indigo-500">*</span>}
+        {label}{req && <span className="ml-0.5 text-zinc-200">*</span>}
       </label>
       <input type={type} value={form[id]} placeholder={ph}
         onChange={e => setForm(f => ({ ...f, [id]: e.target.value }))}
-        className="w-full rounded-[10px] border border-white/[0.08] bg-white/[0.06] px-3 py-2 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition focus:border-indigo-500/55" />
+        className="w-full rounded-[10px] border border-white/[0.08] bg-white/[0.06] px-3 py-2 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition focus:border-white/30" />
     </div>
   );
 
@@ -289,9 +315,9 @@ function StudentsTab({
       <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
         <div className="border-b border-white/[0.07] px-4 py-3.5">
           <h3 className="text-sm font-semibold">Add New Student</h3>
-          <p className="mt-0.5 text-[11px] text-zinc-600">Fields marked <span className="text-indigo-500">*</span> are required</p>
+          <p className="mt-0.5 text-[11px] text-zinc-600">Fields marked <span className="text-zinc-200">*</span> are required</p>
         </div>
-        <form onSubmit={addStudent} className="p-4">
+        <form onSubmit={handleAddStudent} className="p-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-1">
             {F('name',         'Full Name',      true,  'text',  'Aarav Sharma')}
             {F('email',        'Email',          true,  'email', 'student@example.com')}
@@ -301,7 +327,7 @@ function StudentsTab({
             {F('guardianEmail','Guardian Email', false, 'email', 'guardian@example.com')}
             {F('phone',        'Phone',          false, 'tel',   '+91 98765 00000', true)}
           </div>
-          <button type="submit" className="mt-4 w-full rounded-[10px] bg-indigo-500 py-2.5 text-sm font-semibold text-white shadow-[0_2px_14px_rgba(99,102,241,0.28)] transition hover:bg-indigo-400">
+          <button type="submit" className="mt-4 w-full rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_14px_rgba(255,255,255,0.08)] transition hover:bg-zinc-200">
             Add Student
           </button>
         </form>
@@ -312,11 +338,11 @@ function StudentsTab({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3.5">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">Student Records</h3>
-            <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] font-semibold text-indigo-400">{students.length}</span>
+            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-zinc-400">{students.length}</span>
           </div>
           <input type="search" value={query} onChange={e => setQuery(e.target.value)}
             placeholder="Search name, roll, dept..."
-            className="w-52 rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-700 outline-none focus:border-indigo-500/55" />
+            className="w-52 rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-700 outline-none focus:border-white/30" />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px]">
@@ -364,6 +390,10 @@ function StudentsTab({
                           className="rounded-[8px] border border-white/[0.08] bg-white/[0.05] px-2.5 py-1 text-xs font-semibold text-zinc-300 transition hover:bg-white/[0.1]">
                           Mark Present
                         </button>
+                        <button onClick={() => openEnrollModal(s.id, s.name)}
+                          className={`rounded-[8px] border px-2.5 py-1 text-xs font-semibold transition ${s.faceTemplate ? 'border-white/[0.08] bg-white/[0.05] text-zinc-400 hover:bg-white/[0.1]' : 'border-white/25 bg-white/10 text-zinc-400 hover:bg-white/20'}`}>
+                          {s.faceTemplate ? 'Re-enroll' : 'Enroll Face'}
+                        </button>
                         <button onClick={() => removeStudent(s.id)}
                           className="rounded-[8px] border border-red-500/25 bg-red-500/[0.07] px-2.5 py-1 text-xs font-semibold text-red-400 transition hover:bg-red-500/15">
                           Delete
@@ -377,6 +407,47 @@ function StudentsTab({
           </table>
         </div>
       </div>
+
+      {enrollModal.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-5">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl">
+            <div className="border-b border-white/10 px-5 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-white">Enroll Face</h3>
+                <p className="text-xs text-zinc-400">{enrollModal.name}</p>
+              </div>
+              <button onClick={closeEnrollModal} className="text-zinc-500 hover:text-white transition">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div className="p-5">
+              <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black border border-white/10">
+                <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" style={{transform: 'scaleX(-1)'}} />
+                {isCapturing && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="flex items-center gap-2 bg-white text-black text-white px-4 py-2 rounded-full text-sm font-semibold">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Capturing...
+                    </div>
+                  </div>
+                )}
+                <div className="absolute inset-0 pointer-events-none">
+                  <div className="absolute left-[25%] top-[10%] right-[25%] bottom-[10%] border-2 border-dashed border-white/30 rounded-full" />
+                </div>
+              </div>
+              <p className="mt-3 text-center text-xs text-zinc-500">Position the student&apos;s face inside the oval and click Capture.</p>
+              <div className="mt-5 flex gap-3">
+                <button onClick={closeEnrollModal} className="flex-1 rounded-[10px] border border-white/10 bg-white/5 py-2.5 text-sm font-semibold text-zinc-300 transition hover:bg-white/10">
+                  Cancel
+                </button>
+                <button onClick={captureFace} disabled={isCapturing} className="flex-1 rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_14px_rgba(255,255,255,0.08)] transition hover:bg-zinc-200 disabled:opacity-50">
+                  Capture Face
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -393,9 +464,9 @@ function AttendanceTab({
   const [filterDate, setFilterDate] = useState('');
   const [filterStu,  setFilterStu]  = useState('');
 
-  function deleteRecord(id: string) {
+  async function deleteRecord(id: string) {
+    await dbDeleteRecord(id);
     const updated = records.filter(r => r.id !== id);
-    saveRecords(updated);
     onRecordsUpdate(updated);
     showToast('Record deleted.');
   }
@@ -411,13 +482,13 @@ function AttendanceTab({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3.5">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">Attendance Log</h3>
-          <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] font-semibold text-indigo-400">{filtered.length} records</span>
+          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-zinc-400">{filtered.length} records</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
-            className="rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-indigo-500/55" />
+            className="rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-white/30" />
           <select value={filterStu} onChange={e => setFilterStu(e.target.value)}
-            className="rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-indigo-500/55">
+            className="rounded-[9px] border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-white/30">
             <option value="">All Students</option>
             {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
@@ -455,12 +526,12 @@ function AttendanceTab({
                   <td className="px-4 py-3.5 text-sm text-zinc-400">{r.date}</td>
                   <td className="px-4 py-3.5 text-sm text-zinc-500">{t}</td>
                   <td className="px-4 py-3.5">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${r.method === 'face' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/[0.06] text-zinc-400'}`}>{r.method}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${r.method === 'face' ? 'bg-white/10 text-zinc-400' : 'bg-white/[0.06] text-zinc-400'}`}>{r.method}</span>
                   </td>
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-2">
                       <div className="h-1 w-14 overflow-hidden rounded-full bg-white/[0.06]">
-                        <div className="h-full rounded-full bg-indigo-500" style={{ width: `${r.confidence}%` }} />
+                        <div className="h-full rounded-full bg-white text-black" style={{ width: `${r.confidence}%` }} />
                       </div>
                       <span className="text-xs text-zinc-500">{r.confidence}%</span>
                     </div>
@@ -513,9 +584,9 @@ function SettingsTab({
     showToast('Data exported.', 'success');
   }
 
-  function clearAttendance() {
+  async function clearAttendance() {
     if (!confirm('Delete ALL attendance records? This cannot be undone.')) return;
-    saveRecords([]);
+    await clearAllRecords();
     showToast('All attendance records cleared.');
     window.location.reload();
   }
@@ -530,7 +601,7 @@ function SettingsTab({
     <div>
       <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-600">{label}</label>
       <input type="password" value={val} onChange={e => set(e.target.value)} placeholder="••••••••"
-        className="w-full rounded-[10px] border border-white/[0.08] bg-white/[0.06] px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition focus:border-indigo-500/60" />
+        className="w-full rounded-[10px] border border-white/[0.08] bg-white/[0.06] px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition focus:border-white/40" />
     </div>
   );
 
@@ -546,7 +617,7 @@ function SettingsTab({
           <PwField label="Current Password"   val={cur}  set={setCur} />
           <PwField label="New Password"        val={next} set={setNext} />
           <PwField label="Confirm New Password" val={conf} set={setConf} />
-          <button type="submit" className="rounded-[10px] bg-indigo-500 py-2.5 text-sm font-semibold text-white shadow-[0_2px_14px_rgba(99,102,241,0.28)] transition hover:bg-indigo-400">
+          <button type="submit" className="rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_14px_rgba(255,255,255,0.08)] transition hover:bg-zinc-200">
             Update Password
           </button>
         </form>
@@ -607,10 +678,10 @@ function SettingsTab({
 
 // ── Admin page ────────────────────────────────────────────────
 const TABS = [
-  { id: 'dashboard',  label: 'Dashboard'  },
-  { id: 'students',   label: 'Students'   },
-  { id: 'attendance', label: 'Attendance' },
-  { id: 'settings',   label: 'Settings'   },
+  { id: 'dashboard',  label: 'Dashboard',  icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> },
+  { id: 'students',   label: 'Students',   icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+  { id: 'attendance', label: 'Attendance', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
+  { id: 'settings',   label: 'Settings',   icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
 ] as const;
 type TabId = typeof TABS[number]['id'];
 
@@ -626,81 +697,114 @@ export default function AdminPage() {
     const ok = sessionStorage.getItem('da-session') === '1';
     setAuthed(ok);
     setChecked(true);
-    if (ok) { setStudents(getStudents()); setRecords(getRecords()); }
+    if (ok) { 
+      Promise.all([fetchStudents(), fetchRecords()]).then(([s, r]) => {
+        setStudents(s);
+        setRecords(r);
+      });
+    }
   }, []);
 
   function logout() { sessionStorage.removeItem('da-session'); setAuthed(false); }
 
   if (!checked) return null;
-  if (!authed)  return <LoginScreen onLogin={() => { setAuthed(true); setStudents(getStudents()); setRecords(getRecords()); }} />;
+  if (!authed)  return <LoginScreen onLogin={() => { 
+    setAuthed(true); 
+    Promise.all([fetchStudents(), fetchRecords()]).then(([s, r]) => {
+      setStudents(s);
+      setRecords(r);
+    });
+  }} />;
 
   const dateStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
-    <>
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-zinc-950/95 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-[1340px] flex-wrap items-center gap-3 px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-indigo-500 shadow-[0_0_18px_rgba(99,102,241,0.45)]">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
-              </svg>
-            </div>
-            <span className="text-[15px] font-bold tracking-tight text-white">DeepAttend</span>
-            <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-indigo-400">Admin</span>
-          </div>
+    <div className="flex min-h-screen bg-[#09090b]">
+      {/* Sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-white/[0.06] bg-zinc-950/95 backdrop-blur-xl">
+        {/* Logo */}
+        <div className="flex h-16 items-center border-b border-white/[0.06] px-5">
+          <img src="/logo_full.webp" alt="DeepAttend Logo" className="h-6 w-auto" />
+        </div>
 
-          <div className="flex gap-0.5 rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-1">
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`rounded-[7px] px-3.5 py-1.5 text-xs font-semibold transition ${tab === t.id ? 'bg-indigo-500/15 text-indigo-300' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            <Link href="/"
-              className="flex items-center gap-1.5 rounded-[8px] border border-white/[0.08] px-3 py-1.5 text-xs font-semibold text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
-              </svg>
-              Scanner
-            </Link>
-            <button onClick={logout}
-              className="flex items-center gap-1.5 rounded-[8px] border border-white/[0.08] px-3 py-1.5 text-xs font-semibold text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Sign Out
+        {/* Nav */}
+        <nav className="flex flex-1 flex-col gap-1 p-3 pt-4">
+          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-700">Navigation</p>
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all ${
+                tab === t.id
+                  ? 'bg-white/15 text-zinc-300 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.15)]'
+                  : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+              }`}>
+              <span className={tab === t.id ? 'text-zinc-400' : 'text-zinc-600'}>{t.icon}</span>
+              {t.label}
+              {tab === t.id && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-white"/>}
             </button>
-          </div>
-        </div>
-      </nav>
+          ))}
 
-      <main className="mx-auto max-w-[1340px] px-5 py-7">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="my-3 border-t border-white/[0.06]"/>
+          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-700">Tools</p>
+          <Link href="/enroll"
+            className="flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-300">
+            <span className="text-zinc-600">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            </span>
+            Face Enrollment
+          </Link>
+          <Link href="/scanner"
+            className="flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-300">
+            <span className="text-zinc-600">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+            </span>
+            Face Scanner
+            <span className="ml-auto rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">Live</span>
+          </Link>
+        </nav>
+
+        {/* Bottom */}
+        <div className="border-t border-white/[0.06] p-3">
+          <div className="mb-2 rounded-[10px] border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+            <p className="text-[11px] font-semibold text-zinc-400">Administrator</p>
+            <p className="text-[10px] text-zinc-700">{dateStr}</p>
+          </div>
+          <button onClick={logout}
+            className="flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-red-500/[0.08] hover:text-red-400">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign Out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex min-h-screen flex-1 flex-col pl-60">
+        {/* Topbar */}
+        <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-white/[0.06] bg-zinc-950/90 px-8 backdrop-blur-xl">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-indigo-500 mb-0.5">
-              {TABS.find(t => t.id === tab)?.label}
-            </p>
-            <h2 className="text-[20px] font-bold tracking-tight text-white">
-              {tab === 'dashboard'  ? 'System Overview'  :
-               tab === 'students'   ? 'Manage Students'  :
-               tab === 'attendance' ? 'Attendance Log'   :
-               'Account Settings'}
-            </h2>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-200">{TABS.find(t => t.id === tab)?.label}</p>
+            <h1 className="text-lg font-bold tracking-tight text-white">
+              {tab==='dashboard'?'System Overview':tab==='students'?'Manage Students':tab==='attendance'?'Attendance Log':'Account Settings'}
+            </h1>
           </div>
-          <span className="text-xs text-zinc-600">{dateStr}</span>
-        </div>
+          <div className="flex items-center gap-3">
+            <Link href="/scanner" className="flex items-center gap-2 rounded-[10px] bg-white px-4 py-2 text-xs font-semibold text-black shadow-[0_2px_16px_rgba(255,255,255,0.1)] transition hover:bg-zinc-200">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>
+              Open Scanner
+            </Link>
+          </div>
+        </header>
 
-        {tab === 'dashboard'  && <DashboardTab  students={students} records={records} />}
-        {tab === 'students'   && <StudentsTab   students={students} records={records} onUpdate={setStudents} onRecordsUpdate={setRecords} showToast={showToast} />}
-        {tab === 'attendance' && <AttendanceTab students={students} records={records} onRecordsUpdate={setRecords} showToast={showToast} />}
-        {tab === 'settings'   && <SettingsTab   students={students} records={records} showToast={showToast} onLogout={logout} />}
-      </main>
+        <main className="flex-1 px-8 py-7">
+          {tab === 'dashboard'  && <DashboardTab  students={students} records={records} />}
+          {tab === 'students'   && <StudentsTab   students={students} records={records} onUpdate={setStudents} onRecordsUpdate={setRecords} showToast={showToast} />}
+          {tab === 'attendance' && <AttendanceTab students={students} records={records} onRecordsUpdate={setRecords} showToast={showToast} />}
+          {tab === 'settings'   && <SettingsTab   students={students} records={records} showToast={showToast} onLogout={logout} />}
+        </main>
+      </div>
 
       <Toast {...toast} />
-    </>
+    </div>
   );
 }
