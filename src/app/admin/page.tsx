@@ -71,9 +71,10 @@ const IC = {
 
 // ── Login screen ─────────────────────────────────────────────
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const [pw, setPw]         = useState('');
-  const [err, setErr]       = useState('');
+  const [pw, setPw]           = useState('');
+  const [err, setErr]         = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPw, setShowPw]   = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,27 +91,72 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-zinc-950 p-6">
-      <div className="pointer-events-none absolute inset-0 flex items-start justify-center overflow-hidden">
-        <div className="mt-[-80px] h-[500px] w-[500px] rounded-full bg-white/[0.04] blur-3xl" />
+    <div className="relative flex min-h-screen items-center justify-center bg-zinc-950 p-6 overflow-hidden">
+      {/* Background glows + grid */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-40 left-1/2 h-[560px] w-[700px] -translate-x-1/2 rounded-full bg-white/[0.025] blur-[130px]" />
+        <div className="absolute bottom-0 left-0 h-[300px] w-[400px] -translate-x-1/2 translate-y-1/2 rounded-full bg-white/[0.012] blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-[300px] w-[400px] translate-x-1/2 translate-y-1/2 rounded-full bg-white/[0.008] blur-3xl" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.012)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.012)_1px,transparent_1px)] bg-[size:64px_64px]" />
       </div>
-      <div className="relative w-full max-w-[390px]">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <img src="/logo_full.webp" alt="DeepAttend Logo" className="mb-4 h-14 w-auto drop-shadow-[0_0_32px_rgba(255,255,255,0.15)]" />
-          <p className="mt-1 text-sm text-zinc-500">Admin Panel — sign in to continue</p>
+
+      <div className="relative z-10 w-full max-w-[420px]">
+        {/* Institution pill */}
+        <div className="mb-7 flex justify-center">
+          <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 backdrop-blur">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            <span className="text-[10.5px] font-semibold uppercase tracking-widest text-zinc-500">
+              Keystone School of Engineering
+            </span>
+          </div>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-7 shadow-xl shadow-black/30">
-          <form onSubmit={submit} className="flex flex-col gap-4">
+
+        {/* Logo + heading */}
+        <div className="mb-8 text-center">
+          <img src="/logo_full.webp" alt="DeepAttend"
+            className="mx-auto mb-5 h-14 w-auto drop-shadow-[0_0_48px_rgba(255,255,255,0.18)]" />
+          <h1 className="text-[26px] font-bold tracking-tight text-white">Admin Portal</h1>
+          <p className="mt-1.5 text-sm text-zinc-500">Dept. of Computer Engineering&nbsp;·&nbsp;AY 2025–26</p>
+        </div>
+
+        {/* Login card */}
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+          {/* Card header */}
+          <div className="flex items-center gap-3 border-b border-white/[0.06] bg-white/[0.02] px-6 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.08]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-zinc-400">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </div>
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-600">Password</label>
-              <input
-                type="password" value={pw} autoFocus autoComplete="current-password"
-                onChange={e => { setPw(e.target.value); setErr(''); }}
-                placeholder="Enter admin password"
-                className={`w-full rounded-[10px] border bg-white/[0.06] px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition ${
-                  err ? 'border-red-500/50' : 'border-white/[0.08] focus:border-white/40'
-                }`}
-              />
+              <p className="text-[12px] font-semibold text-zinc-300">Secure Sign In</p>
+              <p className="text-[10.5px] text-zinc-600">Enter your admin password to continue</p>
+            </div>
+          </div>
+
+          <form onSubmit={submit} className="flex flex-col gap-5 p-6">
+            <div>
+              <label className="mb-2 block text-[10.5px] font-semibold uppercase tracking-widest text-zinc-600">
+                Admin Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={pw} autoFocus autoComplete="current-password"
+                  onChange={e => { setPw(e.target.value); setErr(''); }}
+                  placeholder="Enter password"
+                  className={`w-full rounded-xl border bg-white/[0.05] px-4 py-3 pr-11 text-sm text-zinc-100 placeholder-zinc-700 outline-none transition ${
+                    err ? 'border-red-500/50 focus:border-red-500/60' : 'border-white/[0.08] focus:border-white/25'
+                  }`}
+                />
+                <button type="button" tabIndex={-1} onClick={() => setShowPw(v => !v)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-700 transition hover:text-zinc-400">
+                  {showPw
+                    ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  }
+                </button>
+              </div>
               {err && (
                 <div className="mt-2 flex items-center gap-1.5">
                   <svg className="shrink-0 text-red-400" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -118,14 +164,33 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
                 </div>
               )}
             </div>
+
             <button type="submit" disabled={loading || !pw}
-              className="flex items-center justify-center gap-2 rounded-[10px] bg-white py-2.5 text-sm font-semibold text-black shadow-[0_2px_16px_rgba(255,255,255,0.1)] transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-55">
+              className="flex items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-semibold text-black shadow-[0_2px_20px_rgba(255,255,255,0.12)] transition hover:bg-zinc-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
               {loading
                 ? <><svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Verifying...</>
-                : 'Sign In'
+                : <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Sign In</>
               }
             </button>
           </form>
+
+          {/* Env password hint */}
+          <div className="border-t border-white/[0.05] bg-white/[0.015] px-6 py-3">
+            <p className="text-center text-[10.5px] text-zinc-700">
+              Default password is controlled by{' '}
+              <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[10px] text-zinc-500">NEXT_PUBLIC_ADMIN_PASSWORD</code>
+            </p>
+          </div>
+        </div>
+
+        {/* Creator credit */}
+        <div className="mt-7 text-center">
+          <p className="text-[11px] text-zinc-600">
+            Developed by{' '}
+            <span className="font-semibold text-zinc-400">Shrawani Gawade</span>
+            {' '}·{' '}TE Computer Engineering
+          </p>
+          <p className="mt-0.5 text-[10px] text-zinc-800">Keystone School of Engineering · 2025–26</p>
         </div>
       </div>
     </div>
@@ -777,6 +842,11 @@ export default function AdminPage() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             Sign Out
           </button>
+          <div className="mt-2 border-t border-white/[0.04] pt-2 px-1">
+            <p className="text-[9.5px] leading-relaxed text-zinc-800">
+              by <span className="font-semibold text-zinc-600">Shrawani Gawade</span> · TE Comp
+            </p>
+          </div>
         </div>
       </aside>
 
