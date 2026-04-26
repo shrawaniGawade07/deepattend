@@ -3,7 +3,7 @@ import type { Student, AttendanceRecord, AttendanceStats } from './types';
 const STUDENT_KEY  = 'deepattend-students';
 const RECORD_KEY   = 'deepattend-records';
 const ADMIN_KEY    = 'deepattend-admin-pass';
-const DEFAULT_PASS = 'admin123';
+const DEFAULT_PASS = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'DeepAttend@Admin';
 
 export const ATTENDANCE_THRESHOLD = 75;
 export const MATCH_THRESHOLD      = 0.88;

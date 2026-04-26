@@ -44,7 +44,7 @@ export async function fetchStudents(): Promise<Student[]> {
     const { data, error } = await supabase!
       .from('students')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('name', { ascending: true });
     if (error) { console.warn('Supabase fallback (fetchStudents):', error.message || error); }
     else {
     return (data ?? []).map(row => ({
@@ -181,6 +181,14 @@ export async function clearAllRecords(): Promise<void> {
     if (error) { console.warn('Supabase fallback (clearAllRecords):', error.message || error); } else return;
   }
   localStorage.setItem(RECORD_KEY, '[]');
+}
+
+export async function clearAllStudents(): Promise<void> {
+  if (isSupabaseReady()) {
+    const { error } = await supabase!.from('students').delete().neq('id', '');
+    if (error) { console.warn('Supabase fallback (clearAllStudents):', error.message || error); } else return;
+  }
+  localStorage.setItem(STUDENT_KEY, '[]');
 }
 
 // ═══════════════════════════════════════════

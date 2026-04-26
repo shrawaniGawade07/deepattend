@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   fetchStudents, addStudent as dbAddStudent, deleteStudent as dbDeleteStudent, updateStudent as dbUpdateStudent,
-  fetchRecords, addRecord as dbAddRecord, deleteRecord as dbDeleteRecord, clearAllRecords,
+  fetchRecords, addRecord as dbAddRecord, deleteRecord as dbDeleteRecord, clearAllRecords, clearAllStudents,
   getAdminPassword, saveAdminPassword,
   todayKey, uid, getStats,
   ATTENDANCE_THRESHOLD,
@@ -591,8 +591,10 @@ function SettingsTab({
     window.location.reload();
   }
 
-  function clearAll() {
+  async function clearAll() {
     if (!confirm('Delete ALL students and attendance data? This cannot be undone.')) return;
+    await clearAllRecords();
+    await clearAllStudents();
     localStorage.clear();
     onLogout();
   }
