@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import nodemailer from 'nodemailer';
 
 interface StudentPayload {
   id: string;
@@ -196,10 +197,20 @@ function buildEmailHtml(student: StudentPayload, allRecords: RecordPayload[]): s
 </html>`;
 }
 
+function createTransport() {
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  if (!user || !pass) return null;
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user, pass },
+  });
+}
+
 async function sendOne(
   student: StudentPayload,
   records: RecordPayload[],
-  apiKey: string,
+  transporter: nodemailer.Transporter,
   from: string,
 ): Promise<{ ok: boolean; reason?: string }> {
   if (!student.email) return { ok: false, reason: 'No email address' };
@@ -215,37 +226,29 @@ async function sendOne(
     to.push(student.guardianEmail);
   }
 
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  try {
+    await transporter.sendMail({
       from,
-      to,
+      to: to.join(', '),
       subject: `Attendance Report — ${student.name} · ${pct}% ${pct >= 75 ? '✓' : '⚠'}`,
       html: buildEmailHtml(student, records),
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    return { ok: false, reason: body };
+    });
+    return { ok: true };
+  } catch (err: unknown) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true };
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
+  const transporter = createTransport();
+  if (!transporter) {
     return NextResponse.json(
-      { error: 'RESEND_API_KEY is not configured on the server.' },
+      { error: 'GMAIL_USER and GMAIL_APP_PASSWORD are not configured on the server.' },
       { status: 500 },
     );
   }
 
-  const from    = process.env.RESEND_FROM ?? 'DeepAttend <onboarding@resend.dev>';
+  const from    = process.env.GMAIL_FROM ?? `DeepAttend <${process.env.GMAIL_USER}>`;
   const payload = await req.json();
   const { mode, student, students, records } = payload as {
     mode: 'single' | 'all';
@@ -256,7 +259,7 @@ export async function POST(req: NextRequest) {
 
   if (mode === 'single') {
     if (!student) return NextResponse.json({ error: 'Missing student' }, { status: 400 });
-    const result = await sendOne(student, records, apiKey, from);
+    const result = await sendOne(student, records, transporter, from);
     if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 500 });
     return NextResponse.json({ sent: 1 });
   }
@@ -266,12 +269,9 @@ export async function POST(req: NextRequest) {
     let sent  = 0;
     const errors: string[] = [];
     for (const s of students) {
-      const result = await sendOne(s, records, apiKey, from);
-      if (result.ok) {
-        sent++;
-      } else {
-        errors.push(`${s.name}: ${result.reason}`);
-      }
+      const result = await sendOne(s, records, transporter, from);
+      if (result.ok) sent++;
+      else errors.push(`${s.name}: ${result.reason}`);
       await new Promise(r => setTimeout(r, 120));
     }
     return NextResponse.json({ sent, failed: errors.length, errors });
