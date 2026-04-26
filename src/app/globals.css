@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+
+body {
+  background: #09090b;
+  color: #f4f4f5;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+/* Scan bar animation — top to bottom inside .scan-frame */
+.scan-bar {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #6366f1, transparent);
+  box-shadow: 0 0 8px #6366f1;
+  animation: scanMove 1.6s ease-in-out infinite;
+}
+
+@keyframes scanMove {
+  0%   { top: 0%;   opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* Progress ring transition */
+.ring-prog {
+  transition: stroke-dashoffset 0.04s linear;
+}
+
+/* Date & search inputs */
+input[type="date"],
+input[type="search"] { color-scheme: dark; }
+
+/* Select */
+select { cursor: pointer; }
+select option { background: #18181b; color: #f4f4f5; }
+
+/* Smooth input/button interactions */
+button { cursor: pointer; }
+button:active:not(:disabled) { transform: scale(0.985); }
+
+/* Focus-visible ring */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.55);
+  outline-offset: 2px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
